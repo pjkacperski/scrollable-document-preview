@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package >
+  <metadata>
+    <id>$id$</id>
+    <version>$version$</version>
+    <title>Three Brave Meerkat's Scrollable Document Preview</title>
+    <authors>Three Brave Meerkats Piotr Jakub Kacperski</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/pjkacperski/scrollable-document-preview/</projectUrl>
+    <description>A C# WinForms Control to preview Migradoc/PDFSharp DDL Documents with scroll and zoom support.</description>
+    <releaseNotes>Initial release of the package.</releaseNotes>
+    <copyright>$copyright$</copyright>
+    <tags>pdfsharp migradoc winforms</tags>
+    <dependencies>
+      <group targetFramework=".NETFramework4.8" />
+    </dependencies>
+  </metadata>
+</package>
