@@ -104,6 +104,11 @@ namespace Tbm.ScrollableDocumentPreview
             }
         }
 
+        public int PageCount
+        {
+            get => renderer.FormattedDocument?.PageCount ?? 0;
+        }
+
         public ScrollableDocumentPreview()
         {
             InitializeComponent();
