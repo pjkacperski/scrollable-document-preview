@@ -58,6 +58,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="PageChangeEventArgs.cs" />
     <Compile Include="UnitConverter.cs" />
     <Compile Include="ScrollableDocumentPreview.cs">
       <SubType>UserControl</SubType>
@@ -67,6 +68,8 @@
     </Compile>
     <Compile Include="GraphicsExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="ZoomChangeEventArgs.cs" />
+    <Compile Include="ZoomMode.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

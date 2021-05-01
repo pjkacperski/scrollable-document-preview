@@ -64,7 +64,6 @@ namespace Tbm.ScrollableDocumentPreview
             this.Name = "ScrollableDocumentPreview";
             this.Size = new System.Drawing.Size(454, 322);
             this.ResumeLayout(false);
-
         }
 
 
