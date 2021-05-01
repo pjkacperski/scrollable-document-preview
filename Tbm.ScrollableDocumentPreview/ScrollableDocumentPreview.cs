@@ -11,11 +11,12 @@ namespace Tbm.ScrollableDocumentPreview
 {
     public partial class ScrollableDocumentPreview : UserControl
     {
-        private const float MaxZoomScale = 5f;
-        private const float MinZoomScale = 0.1f;
+        private const float MaxZoomValue = 5f;
+        private const float MinZoomValue = 0.1f;
         private const float ZoomStep = 0.1f;
 
-        private float scale = 1f;
+        private float zoom = 1f;
+        private ZoomMode zoomMode;
         private Size displaySize = new Size();
 
         private DocumentRenderer renderer;
@@ -23,9 +24,9 @@ namespace Tbm.ScrollableDocumentPreview
         private List<double> pageOffsets = new List<double>();
         private int page = 1;
 
-        public event EventHandler<float> ZoomChanged;
+        public event EventHandler<ZoomChangeEventArgs> ZoomChanged;
 
-        public event EventHandler<int> PageChanged;
+        public event EventHandler<PageChangeEventArgs> PageChanged;
 
         public Brush PageBackgroundBrush { get; set; } = Brushes.White;
 
@@ -57,31 +58,30 @@ namespace Tbm.ScrollableDocumentPreview
                 }
                 documentBoundingBox = new XSize(maxWidth, pageOffset);
                 page = 1;
+                zoom = 1f;
+                zoomMode = ZoomMode.Fixed;
                 vScrollBar.Value = 0;
                 hScrollBar.Value = 0;
                 UpdateDisplayRectAndScrollBars(GetDpi());
-                ZoomChanged?.Invoke(this, scale);
-                PageChanged?.Invoke(this, page);
+                ZoomChanged?.Invoke(this, new ZoomChangeEventArgs(zoom));
+                PageChanged?.Invoke(this, new PageChangeEventArgs(page));
                 Invalidate();
             }
         }
 
         public float Zoom
         {
-            get => scale;
+            get => zoom;
             set
             {
-                value = ClampScale(value);
-                if (value != scale)
+                var x = hScrollBar.Value * value / zoom;
+                var y = vScrollBar.Value * value / zoom;
+                if (SetZoom(value, GetDpi()))
                 {
-                    var x = hScrollBar.Value * value / scale;
-                    var y = vScrollBar.Value * value / scale;
-                    scale = value;
-                    UpdateDisplayRectAndScrollBars(GetDpi());
                     ScrollViewToPosition((int)Math.Round(x), (int)Math.Round(y));
                     Invalidate();
-                    ZoomChanged?.Invoke(this, scale);
                 }
+                zoomMode = ZoomMode.Fixed;
             }
         }
 
@@ -90,17 +90,12 @@ namespace Tbm.ScrollableDocumentPreview
             get => page;
             set
             {
-                if (renderer == null)
-                {
-                    return;
-                }
-
+                zoomMode = ZoomMode.Fixed;
                 if (value <= 0 || value > pageOffsets.Count)
                 {
                     return;
                 }
-
-                ScrollViewToPage(value, GetDpi().Y);
+                ScrollViewToPosition(hScrollBar.Value, GetPageOffsetPx(value, GetDpi().Y));
             }
         }
 
@@ -126,6 +121,16 @@ namespace Tbm.ScrollableDocumentPreview
             Zoom -= ZoomStep;
         }
 
+        public void NextPage()
+        {
+            ++Page;
+        }
+
+        public void PreviousPage()
+        {
+            --Page;
+        }
+
         public void FitZoomToPageWidth()
         {
             if (renderer == null)
@@ -133,16 +138,20 @@ namespace Tbm.ScrollableDocumentPreview
                 return;
             }
 
-            var (dpiX, dpiY) = GetDpi();
+            var dpi = GetDpi();
             var pageSize = renderer.FormattedDocument.GetPageInfo(page).GetPageSize();
-            var pageSizePx = pageSize.ToPixels(dpiX, dpiY);
-            var newScale = ClientRectangle.Width / pageSizePx.Width;
-            var docSizePx = Size.Round(documentBoundingBox.ToPixels(newScale * dpiX, newScale * dpiY));
+            var pageSizePx = pageSize.ToPixels(dpi.X, dpi.Y);
+            var newZoom = ClientRectangle.Width / pageSizePx.Width;
+            var docSizePx = Size.Round(documentBoundingBox.ToPixels(newZoom * dpi.X, newZoom * dpi.Y));
             var displaySize = CalculateDisplaySize(docSizePx, out var _, out var _);
-            // as we possibly change the scale again, the scrollbar(s) might not be needed any longer
+            // as we possibly change the zoom again, the scrollbar(s) might not be needed any longer
             // that's an easy way to start oscillating, so we don't care if that's the case
-            Zoom = (float)(displaySize.Width / pageSizePx.Width);
-            AdjustHScrollToCurrentPage(dpiX);
+            newZoom = (float)(displaySize.Width / pageSizePx.Width);
+            if (ZoomToPageWidth(newZoom, dpi))
+            {
+                Invalidate();
+            }
+            zoomMode = ZoomMode.FitToPageWidth;
         }
 
         public void FitZoomToPageHeight()
@@ -152,15 +161,19 @@ namespace Tbm.ScrollableDocumentPreview
                 return;
             }
 
-            var (dpiX, dpiY) = GetDpi();
-            var pageSizePx = renderer.FormattedDocument.GetPageInfo(page).GetPageSize().ToPixels(dpiX, dpiY);
-            var newScale = ClientRectangle.Height / pageSizePx.Height;
-            var docSizePx = Size.Round(documentBoundingBox.ToPixels(newScale * dpiX, newScale * dpiY));
+            var dpi = GetDpi();
+            var pageSizePx = renderer.FormattedDocument.GetPageInfo(page).GetPageSize().ToPixels(dpi.X, dpi.Y);
+            var newZoom = ClientRectangle.Height / pageSizePx.Height;
+            var docSizePx = Size.Round(documentBoundingBox.ToPixels(newZoom * dpi.X, newZoom * dpi.Y));
             var displaySize = CalculateDisplaySize(docSizePx, out var _, out var _);
-            // as we possibly change the scale again, the scrollbar(s) might not be needed any longer
+            // as we possibly change the zoom again, the scrollbar(s) might not be needed any longer
             // that's an easy way to start oscillating, so we don't care if that's the case
-            Zoom = (float)(displaySize.Height / pageSizePx.Height);
-            ScrollViewToPage(page, dpiY);
+            newZoom = (float)(displaySize.Height / pageSizePx.Height);
+            if (ZoomToPageHeight(newZoom, dpi))
+            {
+                Invalidate();
+            }
+            zoomMode = ZoomMode.FitToPageHeight;
         }
 
         public void FitZoomToPage()
@@ -170,27 +183,23 @@ namespace Tbm.ScrollableDocumentPreview
                 return;
             }
 
-            var (dpiX, dpiY) = GetDpi();
+            var dpi = GetDpi();
             var clientSize = ClientRectangle.Size;
             var pageSize = renderer.FormattedDocument.GetPageInfo(page).GetPageSize();
-            var pageSizePx = pageSize.ToPixels(dpiX, dpiY);
-            var newScale = Math.Min(clientSize.Width / pageSizePx.Width, clientSize.Height / pageSizePx.Height);
-            var docSizePx = Size.Round(documentBoundingBox.ToPixels(newScale * dpiX, newScale * dpiY));
+            var pageSizePx = pageSize.ToPixels(dpi.X, dpi.Y);
+            var newZoom = Math.Min(clientSize.Width / pageSizePx.Width, clientSize.Height / pageSizePx.Height);
+            var docSizePx = Size.Round(documentBoundingBox.ToPixels(newZoom * dpi.X, newZoom * dpi.Y));
             var displaySize = CalculateDisplaySize(docSizePx, out var _, out var _);
-            // as we possibly change the scale again, the scrollbar(s) might not be needed any longer
+            // as we possibly change the zoom again, the scrollbar(s) might not be needed any longer
             // that's an easy way to start oscillating, so we don't care if that's the case
-            var scaleX = displaySize.Width / pageSizePx.Width;
-            var scaleY = displaySize.Height / pageSizePx.Height;
-            if (scaleX < scaleY)
+            var zoomX = displaySize.Width / pageSizePx.Width;
+            var zoomY = displaySize.Height / pageSizePx.Height;
+            var viewChanged = zoomX < zoomY ? ZoomToPageWidth(zoomX, dpi) : ZoomToPageHeight(zoomY, dpi);
+            if (!ScrollViewToPosition(hScrollBar.Value, GetPageOffsetPx(Page, dpi.Y)) && viewChanged)
             {
-                Zoom = scaleX;
-                AdjustHScrollToCurrentPage(dpiY);
+                Invalidate();
             }
-            else
-            {
-                Zoom = scaleY;
-                ScrollViewToPage(page, dpiX);
-            }
+            zoomMode = ZoomMode.FitToPage;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -202,7 +211,7 @@ namespace Tbm.ScrollableDocumentPreview
 
             var dpiX = e.Graphics.DpiX;
             var dpiY = e.Graphics.DpiY;
-            var verticalOffsetInPt = UnitConverter.PixelToPoint(vScrollBar.Value, scale * dpiY);
+            var verticalOffsetInPt = UnitConverter.PixelToPoint(vScrollBar.Value, zoom * dpiY);
             var pageNo = FindPageFromOffset(verticalOffsetInPt);
             var docBoundingBoxPx = GetDocumentBoundingBoxInPixels(dpiX, dpiY);
 
@@ -215,7 +224,7 @@ namespace Tbm.ScrollableDocumentPreview
             else
             {
                 verticalOffsetPx =
-                    UnitConverter.PointToPixel(pageOffsets[pageNo] - verticalOffsetInPt, scale * dpiY);
+                    UnitConverter.PointToPixel(pageOffsets[pageNo] - verticalOffsetInPt, zoom * dpiY);
             }
 
             float horizontalOffsetPx;
@@ -235,11 +244,11 @@ namespace Tbm.ScrollableDocumentPreview
             while (verticalOffsetPx < displaySize.Height && pageNo <= doc.PageCount)
             {
                 var pageSize = doc.GetPageInfo(pageNo).GetPageSize();
-                var pageSizePx = pageSize.ToPixels(scale * dpiX, scale * dpiY);
+                var pageSizePx = pageSize.ToPixels(zoom * dpiX, zoom * dpiY);
                 // center each page of the document around the center of the document bounding box
                 // it makes a great difference when the pages of the document are of different sizes
-                var pageLeftMarginPx = docBoundingBoxPx.Width / 2 - pageSizePx.Width / 2;
-                e.Graphics.TranslateTransform(horizontalOffsetPx + pageLeftMarginPx, (float)verticalOffsetPx);
+                var leftPaddingPx = docBoundingBoxPx.Width / 2 - pageSizePx.Width / 2;
+                e.Graphics.TranslateTransform(horizontalOffsetPx + leftPaddingPx, (float)verticalOffsetPx);
                 e.Graphics.FillRectangle(PageBackgroundBrush, 0, 0, pageSizePx.Width, pageSizePx.Height);
                 e.Graphics.DrawRectangle(PageBorderPen, 0, 0, pageSizePx.Width, pageSizePx.Height);
                 var scaleX = pageSizePx.Width / (float)pageSize.Width;
@@ -271,11 +280,11 @@ namespace Tbm.ScrollableDocumentPreview
             {
                 if (e.Delta >= 0)
                 {
-                    ZoomToPoint(e.Location, scale + ZoomStep);
+                    ZoomToPoint(e.Location, zoom + ZoomStep);
                 }
                 else
                 {
-                    ZoomToPoint(e.Location, scale - ZoomStep);
+                    ZoomToPoint(e.Location, zoom - ZoomStep);
                 }
             }
             else
@@ -336,79 +345,19 @@ namespace Tbm.ScrollableDocumentPreview
         {
             base.OnResize(e);
             UpdateDisplayRectAndScrollBars(GetDpi());
-        }
-
-        private void SetPage(int page)
-        {
-            if (this.page != page)
+            switch (zoomMode)
             {
-                this.page = page;
-                PageChanged?.Invoke(this, page);
-            }
-        }
+                case ZoomMode.FitToPage:
+                    FitZoomToPage();
+                    break;
 
-        private void ScrollViewToPosition(int x, int y)
-        {
-            if (renderer == null)
-            {
-                return;
-            }
+                case ZoomMode.FitToPageHeight:
+                    FitZoomToPageHeight();
+                    break;
 
-            var scrollBarValueChanged = false;
-            void scroll(ScrollBar scrollBar, int value)
-            {
-                value = Math.Min(value, scrollBar.Maximum - scrollBar.LargeChange + 1);
-                value = Math.Max(value, scrollBar.Minimum);
-                if (value != scrollBar.Value)
-                {
-                    scrollBar.Value = value;
-                    scrollBarValueChanged |= true;
-                }
-            }
-            scroll(hScrollBar, x);
-            scroll(vScrollBar, y);
-            if (scrollBarValueChanged)
-            {
-                Invalidate();
-            }
-        }
-
-        private void ScrollViewByOffset(int dx, int dy) =>
-            ScrollViewToPosition(hScrollBar.Value + dx, vScrollBar.Value + dy);
-
-        private void ScrollViewToPage(int page, float dpiY)
-        {
-            if (vScrollBar.Visible)
-            {
-                var offset = UnitConverter.PointToPixel(pageOffsets[page - 1], scale * dpiY);
-                ScrollViewToPosition(hScrollBar.Value, (int)Math.Ceiling(offset));
-            }
-        }
-
-        private void AdjustHScrollToCurrentPage(float dpiX)
-        {
-            if (hScrollBar.Visible)
-            {
-                var docWidthPx = UnitConverter.PointToPixel(documentBoundingBox.Width, scale * dpiX);
-                var pageSize = renderer.FormattedDocument.GetPageInfo(page).GetPageSize();
-                var pageWidthPx = UnitConverter.PointToPixel(pageSize.Width, scale * dpiX);
-                ScrollViewToPosition((int)Math.Round(docWidthPx / 2 - pageWidthPx / 2), vScrollBar.Value);
-            }
-        }
-
-        private void ZoomToPoint(Point origin, float value)
-        {
-            value = ClampScale(value);
-            if (value != scale)
-            {
-                var factor = value / scale;
-                var x = (hScrollBar.Value + origin.X) * factor - origin.X;
-                var y = (vScrollBar.Value + origin.Y) * factor - origin.Y;
-                scale = value;
-                UpdateDisplayRectAndScrollBars(GetDpi());
-                ScrollViewToPosition((int)Math.Round(x), (int)Math.Round(y));
-                Invalidate();
-                ZoomChanged?.Invoke(this, scale);
+                case ZoomMode.FitToPageWidth:
+                    FitZoomToPageWidth();
+                    break;
             }
         }
 
@@ -419,6 +368,9 @@ namespace Tbm.ScrollableDocumentPreview
                 return (graphics.DpiX, graphics.DpiY);
             }
         }
+
+        private Size GetDocumentBoundingBoxInPixels(float dpiX, float dpiY) =>
+            Size.Round(documentBoundingBox.ToPixels(zoom * dpiX, zoom * dpiY));
 
         private int FindPageFromOffset(double offset)
         {
@@ -434,9 +386,6 @@ namespace Tbm.ScrollableDocumentPreview
             }
             return pageNo;
         }
-
-        private Size GetDocumentBoundingBoxInPixels(float dpiX, float dpiY) =>
-            Size.Round(documentBoundingBox.ToPixels(scale * dpiX, scale * dpiY));
 
         private Size CalculateDisplaySize(XSize docBoundingBoxPx, out bool showHScroll, out bool showVScroll)
         {
@@ -519,16 +468,118 @@ namespace Tbm.ScrollableDocumentPreview
             }
         }
 
+        private bool SetPage(int value)
+        {
+            if (page == value || value <= 0 || value > pageOffsets.Count)
+            {
+                return false;
+            }
+            page = value;
+            PageChanged?.Invoke(this, new PageChangeEventArgs(page));
+            return true;
+        }
+
+        private bool SetZoom(float value, (float X, float Y) dpi)
+        {
+            value = ClampZoom(value);
+            if (zoom == value)
+            {
+                return false;
+            }
+            zoom = value;
+            UpdateDisplayRectAndScrollBars(dpi);
+            ZoomChanged?.Invoke(this, new ZoomChangeEventArgs(zoom));
+            return true;
+        }
+
+        private bool ZoomToPageWidth(float newZoom, (float X, float Y) dpi)
+        {
+            var y = vScrollBar.Value * newZoom / zoom;
+            if (SetZoom(newZoom, dpi))
+            {
+                ScrollViewToPosition(GetCurrentPageLeftPadding(dpi.X), (int)Math.Round(y));
+                return true;
+            }
+            return false;
+        }
+
+        private bool ZoomToPageHeight(float newZoom, (float X, float Y) dpi)
+        {
+            var x = hScrollBar.Value * newZoom / zoom;
+            if (SetZoom(newZoom, dpi))
+            {
+                ScrollViewToPosition((int)Math.Round(x), GetPageOffsetPx(page, dpi.Y));
+                return true;
+            }
+            return false;
+        }
+
+        private void ZoomToPoint(Point origin, float value)
+        {
+            var factor = value / zoom;
+            var x = (hScrollBar.Value + origin.X) * factor - origin.X;
+            var y = (vScrollBar.Value + origin.Y) * factor - origin.Y;
+            if (SetZoom(value, GetDpi()))
+            {
+                ScrollViewToPosition((int)Math.Round(x), (int)Math.Round(y));
+                Invalidate();
+            }
+            zoomMode = ZoomMode.Fixed;
+        }
+
+        private bool ScrollViewToPosition(int x, int y)
+        {
+            if (renderer == null)
+            {
+                return false;
+            }
+
+            var scrollBarValueChanged = false;
+            void scroll(ScrollBar scrollBar, int value)
+            {
+                value = Math.Min(value, scrollBar.Maximum - scrollBar.LargeChange + 1);
+                value = Math.Max(value, scrollBar.Minimum);
+                if (value != scrollBar.Value)
+                {
+                    scrollBar.Value = value;
+                    scrollBarValueChanged |= true;
+                }
+            }
+            scroll(hScrollBar, x);
+            scroll(vScrollBar, y);
+            return scrollBarValueChanged;
+        }
+
+        private bool ScrollViewByOffset(int dx, int dy) =>
+            ScrollViewToPosition(hScrollBar.Value + dx, vScrollBar.Value + dy);
+
+        private int GetPageOffsetPx(int page, float dpiY) =>
+            (int)Math.Ceiling(UnitConverter.PointToPixel(pageOffsets[page - 1], zoom * dpiY));
+
+        private int GetCurrentPageLeftPadding(float dpiX)
+        {
+            if (!hScrollBar.Visible)
+            {
+                return 0;
+            }
+            var docWidthPx = UnitConverter.PointToPixel(documentBoundingBox.Width, zoom * dpiX);
+            var pageSize = renderer.FormattedDocument.GetPageInfo(page).GetPageSize();
+            var pageWidthPx = UnitConverter.PointToPixel(pageSize.Width, zoom * dpiX);
+            return (int)Math.Round(docWidthPx / 2 - pageWidthPx / 2);
+        }
+
         private void VScrollBar_ValueChanged(object sender, EventArgs e)
         {
+            zoomMode = ZoomMode.Fixed;
             Invalidate();
         }
 
         private void HScrollBar_ValueChanged(object sender, EventArgs e)
         {
+            zoomMode = ZoomMode.Fixed;
             Invalidate();
         }
 
-        private static float ClampScale(float value) => Math.Min(Math.Max(value, MinZoomScale), MaxZoomScale);
+        private static float ClampZoom(float value) => Math.Min(Math.Max(value, MinZoomValue), MaxZoomValue);
     }
 }

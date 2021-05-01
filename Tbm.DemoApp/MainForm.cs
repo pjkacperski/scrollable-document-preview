@@ -7,8 +7,8 @@ namespace Tbm.DemoApp
         public MainForm()
         {
             InitializeComponent();
-            documentView.PageChanged += (s, page) => toolStripStatusPage.Text = $"Page: {page}";
-            documentView.ZoomChanged += (s, zoom) => toolStripStatusZoom.Text = $"Zoom: {zoom:P0}";
+            documentView.PageChanged += (s, e) => toolStripStatusPage.Text = $"Page: {e.Page}";
+            documentView.ZoomChanged += (s, e) => toolStripStatusZoom.Text = $"Zoom: {e.Zoom:P0}";
         }
 
         private void MainForm_Load(object sender, System.EventArgs e)
