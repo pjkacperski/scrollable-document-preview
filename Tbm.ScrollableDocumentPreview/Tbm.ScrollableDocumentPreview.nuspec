@@ -9,7 +9,7 @@
     <license type="expression">MIT</license>
     <projectUrl>https://github.com/pjkacperski/scrollable-document-preview/</projectUrl>
     <description>A C# WinForms Control to preview Migradoc/PDFSharp DDL Documents with scroll and zoom support.</description>
-    <releaseNotes>Adding PageCount property.</releaseNotes>
+    <releaseNotes>Tweaked Preview's zooming. Changed events.</releaseNotes>
     <copyright>$copyright$</copyright>
     <tags>pdfsharp migradoc winforms</tags>
     <dependencies>
